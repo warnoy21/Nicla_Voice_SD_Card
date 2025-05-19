@@ -1,0 +1,91 @@
+#include "Arduino.h"
+#include "NDP.h"
+
+#undef abs
+#define USE_INT24_FROM_INT
+#include "C:\Users\Aaron Gumba.000\Documents\Arduino\libraries\audio-tools\src\AudioTools.h"
+#include "C:\Users\Aaron Gumba.000\Documents\Arduino\libraries\audio-tools\src\AudioTools\AudioCodecs\CodecG722.h"
+#include <Nicla_System.h>
+
+#include <SPI.h>
+#include <SD.h>
+G722Encoder encoder;
+const bool lowestPower = false;
+
+// Recording Related
+uint8_t data[2048];
+
+// File Related
+File myFile;
+String FILE_PATH = "DATA/FILE.TXT";
+const int chipSelect = 6;
+
+class CustomPrint : public Print {
+public:
+  size_t write(uint8_t d) override {
+    return myFile.write(d);
+  }
+};
+
+CustomPrint intermediaryPrint; // Create an instance of the custom print class
+
+void setup() {
+
+  Serial.begin(115200);
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+
+  nicla::begin();
+  // nicla::disableLDO();
+  nicla::leds.begin();
+
+  // SD Card Initialization
+  Serial.print("Initializing SD card...");
+
+  if (!SD.begin(chipSelect)) {
+    Serial.println("initialization failed!");
+    while (1);
+  }
+    if (!SD.exists("/DATA")) {
+    SD.mkdir("/DATA");
+  }
+  Serial.println("initialization done.");
+
+  myFile = SD.open(FILE_PATH, FILE_WRITE);
+  if (!myFile) {
+    Serial.println("File open failed!");
+    while (1);
+  }
+  AudioInfo bi;
+  bi.channels = 1;
+  bi.sample_rate = 16000;
+
+  encoder.setOptions(0);
+  encoder.begin();
+  myFile = SD.open(FILE_PATH, FILE_WRITE);
+  encoder.setOutput(myFile);
+
+  Serial.println("Loading synpackages");
+  NDP.begin("mcu_fw_120_v91.synpkg");
+  NDP.load("dsp_firmware_v91.synpkg");
+
+  Serial.println("packages loaded");
+  NDP.getInfo();
+
+  Serial.println("Configure mic");
+  NDP.turnOnMicrophone();
+  int chunk_size = NDP.getAudioChunkSize();
+  if (chunk_size >= sizeof(data)) {
+    for(;;);
+  }
+}
+
+void loop() {
+    unsigned int len = 0;
+    NDP.extractData(data, &len);
+    encoder.write(data, len);
+    myFile.flush();
+    myFile.close();
+    myFile = SD.open(FILE_PATH, FILE_WRITE);
+}
